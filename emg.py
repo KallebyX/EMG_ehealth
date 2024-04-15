@@ -28,13 +28,13 @@ def read_serial_data(n_samples=1000):
 # Funções de Filtragem
 def apply_filters(data, fs=1000):
     # Filtro passa-baixa para remover alta frequência de ruído
-    low_cutoff = 50  # frequência de corte do filtro passa-baixa
+    low_cutoff = 20  # frequência de corte do filtro passa-baixa
     b, a = butter(6, low_cutoff / (0.5 * fs), btype='low')
     low_passed = filtfilt(b, a, data)
     
     # Filtro Notch para remover a frequência da rede elétrica (60 Hz no Brasil)
-    notch_freq = 60  # frequência central do filtro notch
-    quality_factor = 30  # fator de qualidade que define a largura da banda de rejeição
+    notch_freq = 75  # frequência central do filtro notch
+    quality_factor = 45  # fator de qualidade que define a largura da banda de rejeição
     b, a = iirnotch(notch_freq / (0.5 * fs), quality_factor)
     notch_filtered = filtfilt(b, a, low_passed)
     
@@ -88,4 +88,3 @@ plt.xlabel('Sample Number')
 plt.ylabel('EMG Signal Amplitude')
 plt.legend()
 plt.show()
-
