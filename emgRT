@@ -5,55 +5,61 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 # Configuração da porta serial
-port = 'COM3'  # Substitua pela sua porta
-baud_rate = 115200  # Deve corresponder ao configurado no Arduino
+port = 'COM3'
+baud_rate = 115200
 ser = serial.Serial(port, baudrate=baud_rate, timeout=1)
 
-def read_serial_data():
-    """Lê um único valor da porta serial."""
-    if ser.in_waiting:
-        line = ser.readline().decode().strip()
-        try:
-            value = float(line)
-            return value
-        except ValueError:
-            return None
+# Configuração inicial para filtros
+fs = 1000  # Taxa de amostragem
+low_cutoff = 50
+notch_freq = 60
+quality_factor = 30
+b_low, a_low = butter(6, low_cutoff / (0.5 * fs), btype='low')
+b_notch, a_notch = iirnotch(notch_freq / (0.5 * fs), quality_factor)
 
-def apply_filters(data, fs=1000):
-    """Aplica filtro passa-baixa e notch ao array de dados fornecido."""
-    low_cutoff = 50  # frequência de corte do filtro passa-baixa
-    b, a = butter(6, low_cutoff / (0.5 * fs), btype='low')
-    data = filtfilt(b, a, data)
-    
-    notch_freq = 60  # frequência central do filtro notch (ajuste conforme a sua região)
-    quality_factor = 30  # fator de qualidade que define a largura da banda de rejeição
-    b, a = iirnotch(notch_freq / (0.5 * fs), quality_factor)
-    data = filtfilt(b, a, data)
-    
-    return data
+# Buffer de dados
+data_buffer = np.array([])
+
+def update_data(new_data):
+    global data_buffer
+    data_buffer = np.append(data_buffer, new_data)
+    if len(data_buffer) > 2000:
+        data_buffer = data_buffer[-2000:]  # Mantém apenas os últimos 2000 pontos
+
+def apply_filters(data):
+    low_passed = filtfilt(b_low, a_low, data)
+    notch_filtered = filtfilt(b_notch, a_notch, low_passed)
+    return notch_filtered
 
 fig, ax = plt.subplots()
 xdata, ydata = [], []
-ln, = plt.plot([], [], 'r-', animated=True)
+line1, = ax.plot([], [], 'b-', label='Raw Data')
+line2, = ax.plot([], [], 'r-', label='Filtered Data')
 
 def init():
-    """Inicializa o gráfico."""
-    ax.set_xlim(0, 500)
-    ax.set_ylim(-10, 10)
-    return ln,
+    ax.set_xlim(0, 2000)
+    ax.set_ylim(-5, 5)
+    return line1, line2
 
 def update(frame):
-    """Atualiza a figura do gráfico para cada frame."""
     value = read_serial_data()
     if value is not None:
-        xdata.append(len(xdata))
-        ydata.append(value)
-        # Aplica o filtro se tiver dados suficientes
-        if len(ydata) > 50:
-            ydata_filtered = apply_filters(np.array(ydata[-50:]), fs=1000)
-            ln.set_data(xdata[-50:], ydata_filtered)
-            ax.set_xlim(max(0, len(xdata)-500), len(xdata))
-    return ln,
+        update_data(value)
+        filtered_data = apply_filters(data_buffer)
+        xdata = np.arange(len(data_buffer))
+        line1.set_data(xdata, data_buffer)
+        line2.set_data(xdata, filtered_data)
+        ax.set_xlim(max(0, len(data_buffer)-2000), max(2000, len(data_buffer)))
+    return line1, line2
 
-ani = FuncAnimation(fig, update, init_func=init, blit=True, interval=50)
+def read_serial_data():
+    if ser.in_waiting:
+        line = ser.readline().decode().strip()
+        try:
+            return float(line)
+        except ValueError:
+            return None
+
+ani = FuncAnimation(fig, update, init_func=init, interval=50, blit=True)
+plt.legend()
 plt.show()
