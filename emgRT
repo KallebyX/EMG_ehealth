@@ -1,0 +1,59 @@
+import serial
+import numpy as np
+from scipy.signal import butter, filtfilt, iirnotch
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+# Configuração da porta serial
+port = 'COM3'  # Substitua pela sua porta
+baud_rate = 115200  # Deve corresponder ao configurado no Arduino
+ser = serial.Serial(port, baudrate=baud_rate, timeout=1)
+
+def read_serial_data():
+    """Lê um único valor da porta serial."""
+    if ser.in_waiting:
+        line = ser.readline().decode().strip()
+        try:
+            value = float(line)
+            return value
+        except ValueError:
+            return None
+
+def apply_filters(data, fs=1000):
+    """Aplica filtro passa-baixa e notch ao array de dados fornecido."""
+    low_cutoff = 50  # frequência de corte do filtro passa-baixa
+    b, a = butter(6, low_cutoff / (0.5 * fs), btype='low')
+    data = filtfilt(b, a, data)
+    
+    notch_freq = 60  # frequência central do filtro notch (ajuste conforme a sua região)
+    quality_factor = 30  # fator de qualidade que define a largura da banda de rejeição
+    b, a = iirnotch(notch_freq / (0.5 * fs), quality_factor)
+    data = filtfilt(b, a, data)
+    
+    return data
+
+fig, ax = plt.subplots()
+xdata, ydata = [], []
+ln, = plt.plot([], [], 'r-', animated=True)
+
+def init():
+    """Inicializa o gráfico."""
+    ax.set_xlim(0, 500)
+    ax.set_ylim(-10, 10)
+    return ln,
+
+def update(frame):
+    """Atualiza a figura do gráfico para cada frame."""
+    value = read_serial_data()
+    if value is not None:
+        xdata.append(len(xdata))
+        ydata.append(value)
+        # Aplica o filtro se tiver dados suficientes
+        if len(ydata) > 50:
+            ydata_filtered = apply_filters(np.array(ydata[-50:]), fs=1000)
+            ln.set_data(xdata[-50:], ydata_filtered)
+            ax.set_xlim(max(0, len(xdata)-500), len(xdata))
+    return ln,
+
+ani = FuncAnimation(fig, update, init_func=init, blit=True, interval=50)
+plt.show()
