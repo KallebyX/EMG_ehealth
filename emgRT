@@ -3,63 +3,66 @@ import numpy as np
 from scipy.signal import butter, filtfilt, iirnotch
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import StandardScaler
 
 # Configuração da porta serial
-port = 'COM3'
-baud_rate = 115200
+port = 'COM3'  # Substitua pela sua porta
+baud_rate = 115200  # Deve corresponder ao configurado no Arduino
 ser = serial.Serial(port, baudrate=baud_rate, timeout=1)
 
-# Configuração inicial para filtros
-fs = 1000  # Taxa de amostragem
-low_cutoff = 50
-notch_freq = 60
-quality_factor = 30
-b_low, a_low = butter(6, low_cutoff / (0.5 * fs), btype='low')
-b_notch, a_notch = iirnotch(notch_freq / (0.5 * fs), quality_factor)
-
-# Buffer de dados
-data_buffer = np.array([])
-
-def update_data(new_data):
-    global data_buffer
-    data_buffer = np.append(data_buffer, new_data)
-    if len(data_buffer) > 2000:
-        data_buffer = data_buffer[-2000:]  # Mantém apenas os últimos 2000 pontos
-
-def apply_filters(data):
-    low_passed = filtfilt(b_low, a_low, data)
-    notch_filtered = filtfilt(b_notch, a_notch, low_passed)
+# Funções de Filtragem
+def apply_filters(data, fs=1000):
+    low_cutoff = 20
+    b, a = butter(6, low_cutoff / (0.5 * fs), btype='low')
+    low_passed = filtfilt(b, a, data)
+    notch_freq = 75
+    quality_factor = 45
+    b, a = iirnotch(notch_freq / (0.5 * fs), quality_factor)
+    notch_filtered = filtfilt(b, a, low_passed)
     return notch_filtered
 
+# Configuração do gráfico
 fig, ax = plt.subplots()
-xdata, ydata = [], []
-line1, = ax.plot([], [], 'b-', label='Raw Data')
-line2, = ax.plot([], [], 'r-', label='Filtered Data')
+line, = ax.plot([], [], 'r-')
+ax.set_xlim(0, 1000)
+ax.set_ylim(-5, 5)
+ax.set_xlabel('Sample Number')
+ax.set_ylabel('EMG Signal Amplitude')
+ax.set_title("EMG Data Visualization in Real-Time")
 
+# Inicialização da animação
 def init():
-    ax.set_xlim(0, 2000)
-    ax.set_ylim(-5, 5)
-    return line1, line2
+    line.set_data([], [])
+    return line,
 
+# Atualização da animação
 def update(frame):
-    value = read_serial_data()
-    if value is not None:
-        update_data(value)
-        filtered_data = apply_filters(data_buffer)
-        xdata = np.arange(len(data_buffer))
-        line1.set_data(xdata, data_buffer)
-        line2.set_data(xdata, filtered_data)
-        ax.set_xlim(max(0, len(data_buffer)-2000), max(2000, len(data_buffer)))
-    return line1, line2
+    line.set_data(np.arange(len(frame)), frame)
+    return line,
 
-def read_serial_data():
-    if ser.in_waiting:
-        line = ser.readline().decode().strip()
-        try:
-            return float(line)
-        except ValueError:
-            return None
+# Coleta de dados em tempo real
+def data_gen():
+    data = []
+    while True:
+        if ser.in_waiting:
+            line = ser.readline().decode().strip()
+            try:
+                value = float(line)
+                data.append(value)
+                if len(data) >= 1000:
+                    filtered_data = apply_filters(np.array(data))
+                    yield filtered_data
+                    data = data[100:]  # Overlap de 900 amostras
+            except ValueError:
+                continue
 
-ani = FuncAnimation(fig, update, init_func=init, interval=50, blit=True)
-plt.legend()
+ani = FuncAnimation(fig, update, frames=data_gen, init_func=init, blit=True)
 plt.show()
+pip install numpy
+pip install matplotlib
+pip install scipy
+pip install pyserial
+pip install scikit-learn
