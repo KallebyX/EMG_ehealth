@@ -5,11 +5,16 @@ import plotly.graph_objs as go
 import serial
 import numpy as np
 from scipy.signal import butter, filtfilt, iirnotch
+import threading
+import queue
 
 # Configuração da porta serial
 port = 'COM3'
 baud_rate = 115200
 ser = serial.Serial(port, baudrate=baud_rate, timeout=1)
+
+# Fila para armazenar dados recebidos
+data_queue = queue.Queue()
 
 # Função de filtragem
 def apply_filters(data, fs=1000):
@@ -21,6 +26,22 @@ def apply_filters(data, fs=1000):
     b, a = iirnotch(notch_freq / (0.5 * fs), quality_factor)
     notch_filtered = filtfilt(b, a, low_passed)
     return notch_filtered
+
+# Thread para ler dados da porta serial
+def serial_thread():
+    while True:
+        if ser.in_waiting:
+            line = ser.readline().decode().strip()
+            try:
+                value = float(line)
+                data_queue.put(value)
+            except ValueError:
+                continue
+
+# Iniciar thread de leitura serial
+thread = threading.Thread(target=serial_thread)
+thread.daemon = True
+thread.start()
 
 # Configuração inicial do Dash
 app = dash.Dash(__name__)
@@ -40,30 +61,22 @@ app.layout = html.Div([
 )
 def update_graph_scatter(n):
     data = []
-    while len(data) < 200:
-        if ser.in_waiting:
-            line = ser.readline().decode().strip()
-            try:
-                value = float(line)
-                data.append(value)
-            except ValueError:
-                continue
-    filtered_data = apply_filters(np.array(data))
-    X = list(range(len(filtered_data)))
-    
-    data = go.Scatter(
-        x=list(X),
-        y=filtered_data,
-        name='Scatter',
-        mode= 'lines+markers'
-    )
+    while not data_queue.empty() and len(data) < 200:
+        data.append(data_queue.get())
+    if data:
+        filtered_data = apply_filters(np.array(data))
+        X = list(range(len(filtered_data)))
 
-    return {'data': [data], 'layout' : go.Layout(xaxis=dict(range=[min(X), max(X)]), yaxis=dict(range=[min(filtered_data), max(filtered_data)]))}
+        plot_data = go.Scatter(
+            x=list(X),
+            y=filtered_data,
+            name='Scatter',
+            mode='lines+markers'
+        )
+
+        return {'data': [plot_data], 'layout' : go.Layout(xaxis=dict(range=[min(X), max(X)]), yaxis=dict(range=[min(filtered_data), max(filtered_data)]))}
+    return dash.no_update
 
 if __name__ == '__main__':
     app.run_server(debug=True)
-pip install dash
-pip install plotly
-pip install numpy
-pip install scipy
-pip install pyserial
+pip install dash plotly numpy scipy pyserial
