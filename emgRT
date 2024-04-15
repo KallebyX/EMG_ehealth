@@ -1,19 +1,17 @@
+import dash
+from dash import dcc, html
+from dash.dependencies import Input, Output
+import plotly.graph_objs as go
 import serial
 import numpy as np
 from scipy.signal import butter, filtfilt, iirnotch
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
-from sklearn.preprocessing import StandardScaler
 
 # Configuração da porta serial
-port = 'COM3'  # Substitua pela sua porta
-baud_rate = 115200  # Deve corresponder ao configurado no Arduino
+port = 'COM3'
+baud_rate = 115200
 ser = serial.Serial(port, baudrate=baud_rate, timeout=1)
 
-# Funções de Filtragem
+# Função de filtragem
 def apply_filters(data, fs=1000):
     low_cutoff = 20
     b, a = butter(6, low_cutoff / (0.5 * fs), btype='low')
@@ -24,45 +22,48 @@ def apply_filters(data, fs=1000):
     notch_filtered = filtfilt(b, a, low_passed)
     return notch_filtered
 
-# Configuração do gráfico
-fig, ax = plt.subplots()
-line, = ax.plot([], [], 'r-')
-ax.set_xlim(0, 1000)
-ax.set_ylim(-5, 5)
-ax.set_xlabel('Sample Number')
-ax.set_ylabel('EMG Signal Amplitude')
-ax.set_title("EMG Data Visualization in Real-Time")
+# Configuração inicial do Dash
+app = dash.Dash(__name__)
+app.layout = html.Div([
+    dcc.Graph(id='live-graph', animate=True),
+    dcc.Interval(
+        id='graph-update',
+        interval=1000,  # in milliseconds
+        n_intervals=0
+    )
+])
 
-# Inicialização da animação
-def init():
-    line.set_data([], [])
-    return line,
-
-# Atualização da animação
-def update(frame):
-    line.set_data(np.arange(len(frame)), frame)
-    return line,
-
-# Coleta de dados em tempo real
-def data_gen():
+# Callback para atualizar o gráfico
+@app.callback(
+    Output('live-graph', 'figure'),
+    [Input('graph-update', 'n_intervals')]
+)
+def update_graph_scatter(n):
     data = []
-    while True:
+    while len(data) < 200:
         if ser.in_waiting:
             line = ser.readline().decode().strip()
             try:
                 value = float(line)
                 data.append(value)
-                if len(data) >= 1000:
-                    filtered_data = apply_filters(np.array(data))
-                    yield filtered_data
-                    data = data[100:]  # Overlap de 900 amostras
             except ValueError:
                 continue
+    filtered_data = apply_filters(np.array(data))
+    X = list(range(len(filtered_data)))
+    
+    data = go.Scatter(
+        x=list(X),
+        y=filtered_data,
+        name='Scatter',
+        mode= 'lines+markers'
+    )
 
-ani = FuncAnimation(fig, update, frames=data_gen, init_func=init, blit=True)
-plt.show()
+    return {'data': [data], 'layout' : go.Layout(xaxis=dict(range=[min(X), max(X)]), yaxis=dict(range=[min(filtered_data), max(filtered_data)]))}
+
+if __name__ == '__main__':
+    app.run_server(debug=True)
+pip install dash
+pip install plotly
 pip install numpy
-pip install matplotlib
 pip install scipy
 pip install pyserial
-pip install scikit-learn
